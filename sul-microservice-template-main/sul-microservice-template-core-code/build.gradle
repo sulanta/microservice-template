@@ -1,0 +1,103 @@
+evaluationDependsOn(':')
+
+dependencies {
+    implementation (
+            "com.nike.riposte:riposte-spi:$riposteVersion",
+            "com.nike.riposte:riposte-core:$riposteVersion",
+            "com.nike.riposte:riposte-typesafe-config:$riposteVersion",
+            "com.nike.riposte:riposte-guice:$riposteVersion",
+            "com.nike.riposte:riposte-guice-typesafe-config:$riposteVersion",
+            "com.nike.riposte:riposte-async-http-client2:$riposteVersion",
+            // TODO: EXAMPLE CLEANUP - Uncomment the riposte-service-registration-eureka dependency below if you need Eureka for service registration, otherwise delete it.
+//            "com.nike.riposte:riposte-service-registration-eureka:$riposteVersion",
+            "com.nike.riposte:riposte-metrics-codahale:$riposteVersion",
+            "com.nike.riposte:riposte-auth:$riposteVersion",
+
+            // Guice 5.1.0 or later required for Java 17 support.
+            "com.google.inject:guice:$guiceVersion",
+
+            "com.google.code.findbugs:jsr305:$googleFindbugsJsr305Version", // So Guice can pick up @Nullable
+            "org.jetbrains:annotations:$jetbrainsAnnotationsVersion",
+
+            "ch.qos.logback:logback-classic:$logbackVersion",
+            "ch.qos.logback:logback-core:$logbackVersion",
+            "org.codehaus.janino:janino:$janinoVersion", // For conditional processing in logback config XML
+            "org.slf4j:jcl-over-slf4j:$slf4jVersion",
+            "org.slf4j:log4j-over-slf4j:$slf4jVersion",
+
+            "javax.validation:validation-api:$validationApiVersion",
+            "org.hibernate:hibernate-validator:$hibernateValidatorVersion",
+            "javax.el:javax.el-api:$elApiVersion", // The el-api and el-impl are needed for the JSR 303 validation
+            "org.glassfish:javax.el:$elImplVersion",
+            
+            // The jaxb-api is needed for java 11 as these classes were moved out of the Java SE libs, but are needed for JSR 303 validation.
+            "javax.xml.bind:jaxb-api:$jaxbApiVersion",
+
+            // Define the Jackson modules we depend on explicitly to guarantee the same version is used
+            "com.fasterxml.jackson.core:jackson-databind:$jacksonVersion",
+            "com.fasterxml.jackson.core:jackson-annotations:$jacksonVersion",
+            "com.fasterxml.jackson.core:jackson-core:$jacksonVersion",
+    )
+
+    testImplementation (
+            "org.junit.jupiter:junit-jupiter-api:$junit5Version",
+            "org.junit.jupiter:junit-jupiter-engine:$junit5Version",
+            "org.junit.jupiter:junit-jupiter-params:$junit5Version",
+            "org.assertj:assertj-core:$assertJVersion",
+            "org.mockito:mockito-core:$mockitoVersion",
+            "com.nike.backstopper:backstopper-reusable-tests-junit5:$backstopperVersion",
+            "io.rest-assured:rest-assured:$restAssuredVersion",
+    )
+}
+
+processResources {
+    doFirst {
+        createLocalPropertiesOverrideFileIfNeeded()
+    }
+}
+
+def createLocalPropertiesOverrideFileIfNeeded() {
+    // Create a *-local-overrides.conf properties file if it doesn't already exist.
+    String filePath = "$buildDir"
+    filePath = filePath.substring(0, filePath.indexOf("/build"))
+    filePath += "/src/main/resources"
+    String filename = "$rootProject.name-local-overrides.conf"
+    File localPropertiesOverrideFile = new File("$filePath/$filename")
+    if (!localPropertiesOverrideFile.exists()) {
+        println("\nNOTE: The $filename file does not exist. " +
+                "Creating an empty file for it at location: ${localPropertiesOverrideFile.getAbsolutePath()}.\n"
+        )
+
+        boolean success
+        try {
+            success = localPropertiesOverrideFile.createNewFile()
+        }
+        catch(Throwable t) {
+            success = false
+            println("An exception was thrown while trying to create ${localPropertiesOverrideFile.getAbsolutePath()}: " + t.toString())
+        }
+
+        if (success) {
+            String fileContents = "# Add local environment overrides for your machine here - this is not checked " +
+                                  "into git, so you can set any properties you want without affecting other people.\n\n"
+            localPropertiesOverrideFile << fileContents
+        } else {
+            println("WARNING: Unable to create the $filename file at location " +
+                    "${localPropertiesOverrideFile.getAbsolutePath()}. Please create it manually.\n"
+            )
+        }
+    }
+}
+
+jar {
+    dependsOn processResources
+
+    doFirst {
+        // Add version information to the app's main properties file
+        ant.replace(file: "$buildDir/resources/main/${rootProject.name}.conf", token: "@@RELEASE@@", value: archiveVersion.get())
+
+        // Replace version and appname info in logback.xml so that log messages will be tagged with the correct values.
+        ant.replace(file: "$buildDir/resources/main/logback.xml", token: "@@RELEASE@@", value: archiveVersion.get())
+        ant.replace(file: "$buildDir/resources/main/logback.xml", token: "@@APPNAME@@", value: artifactId)
+    }
+}

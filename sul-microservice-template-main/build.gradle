@@ -1,0 +1,228 @@
+// ========== GRADLE PLUGINS / REPOSITORIES SETUP
+buildscript {
+    repositories {
+        gradlePluginPortal()
+        mavenCentral()
+    }
+    dependencies {
+        // STUFF FOR SHADOW JAR - this builds the fat jar that contains the final application for deployment
+        classpath 'gradle.plugin.com.github.johnrengelman:shadow:7.1.2'
+    }
+}
+
+apply plugin: 'application'
+apply plugin: 'com.github.johnrengelman.shadow'
+apply plugin: 'groovy'
+
+// Define args for the application plugin so that `./gradlew run` launches the app with the correct system properties.
+mainClassName = "com.myorg.Main"
+applicationDefaultJvmArgs = [ "-D@appId=" + project.name , "-D@environment=local" ]
+
+// All modules should apply the following bits
+allprojects {
+    apply plugin: 'java'
+    apply plugin: 'project-report'
+    apply plugin: 'idea'
+
+    // Include source jar
+    task sourcesJar(type: Jar, dependsOn: classes) {
+        archiveClassifier.set('sources')
+        from sourceSets.main.allSource
+    }
+
+    artifacts {
+        archives sourcesJar
+    }
+
+    // Tell IntelliJ to download sources
+    idea {
+        module {
+            downloadSources = true
+        }
+    }
+
+    // Define the repos used for finding dependencies.
+    repositories {
+        mavenCentral()
+    }
+
+    test {
+        useJUnitPlatform()
+
+        // Minimize console spam while running tests without swallowing critical debugging info.
+        testLogging {
+            exceptionFormat "FULL"
+            // If you want to see all the tests individually as they're completed, include "passed" in the events list.
+            events "skipped", "failed"
+            displayGranularity = 0
+            showExceptions true
+            showCauses true
+            showStackTraces true
+        }
+
+        ignoreFailures = false
+    }
+
+    //http://www.gradle.org/docs/current/userguide/java_plugin.html
+    // Want Java 17? Then replace the JavaVersion.VERSION_11 references below with JavaVersion.VERSION_17, and
+    //      build and run with a Java 17 JDK. No other changes are needed - this project is Java 17 ready.
+    sourceCompatibility = JavaVersion.VERSION_11
+    targetCompatibility = JavaVersion.VERSION_11
+}
+
+run {
+    // Make sure system properties included in the gradle task are piped through to the application.
+    systemProperties.putAll(System.getProperties())
+}
+
+artifacts {
+    archives shadowJar
+}
+
+// ========== PROPERTIES AND DEPENDENCIES
+ext {
+    // DEPENDENCY VERSIONS
+    riposteVersion = '0.20.0'
+    backstopperVersion = '0.15.0'
+    slf4jVersion = '1.7.36'
+    logbackVersion = '1.2.11'
+    janinoVersion = '3.1.7'
+    jacksonVersion = '2.13.3'
+    googleFindbugsJsr305Version = '3.0.2'
+    jetbrainsAnnotationsVersion = '23.0.0'
+    // Guice 5.1.0 or later required for Java 17 support.
+    guiceVersion = '5.1.0'
+
+    validationApiVersion = '2.0.1.Final'
+    hibernateValidatorVersion = '6.2.3.Final'
+    elApiVersion = '3.0.1-b06'
+    elImplVersion = '3.0.1-b12'
+    jaxbApiVersion = '2.4.0-b180830.0359'
+
+    junit5Version = '5.8.2'
+    mockitoVersion = '4.6.0'
+    assertJVersion = '3.23.0'
+    restAssuredVersion = '5.1.0'
+
+    // JACOCO PROPERTIES
+    jacocoToolVersion = '0.8.8'
+    // Anything in this jacocoExclusions list will be excluded from coverage reports. The format is paths to class
+    //      files, with wildcards allowed. e.g.: jacocoExclusions = [ "com/nike/Foo.class", "**/Bar*.*" ]
+    jacocoExclusions = ['setup*.*', '**/Example*Endpoint*.*']
+    jacocoCoverageThresholdSetup = {
+        // You can filter to only specific submodules by adjusting the code in the findAll { [condition] } code block.
+        //      (The logic is farmed out to the isSubprojectIncludedInJacocoReports(Project) function, since it is
+        //      reused in multiple places).
+        // You can also run the coverage checks on the combo report rather than submodule reports by removing the
+        //      configure(...) block entirely, thus putting the jacocoCoverage task at the root level.
+        configure(subprojects.findAll {
+            //noinspection GroovyAssignabilityCheck
+            isSubprojectIncludedInJacocoReports(it)
+        }) {
+            // Configure the minimum code coverage rules.
+            jacocoTestCoverageVerification { JacocoCoverageVerification v ->
+                violationRules {
+                    rule { JacocoViolationRule r ->
+                        enabled = true
+                        limit {
+                            minimum = 0.8
+                            counter = "INSTRUCTION"
+                        }
+
+                    }
+
+                    rule { JacocoViolationRule r ->
+                        enabled = true
+                        limit {
+                            minimum = 0.8
+                            counter = "BRANCH"
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // Configure which subprojects we're doing jacoco for.
+    isSubprojectIncludedInJacocoReports = { Project subProj ->
+        // For this repo we'll include everything that's not the remote-tests submodule.
+        return !subProj.getName().contains("remote-tests")
+    }
+}
+
+allprojects {
+    configurations.all {
+        // Other libraries like to include random versions of mockito. Make sure we force the version we want.
+        resolutionStrategy.force "org.mockito:mockito-core:$mockitoVersion"
+
+        // Don't accidentally transitively pull in SLF4J implementations we don't want to use from other libraries.
+        //      NOTE: If you'd prefer to use one of these rather than logback then you'll need to remove the exclusion
+        //      for the lib you want and exclude logback instead.
+        exclude group: 'org.slf4j', module: 'slf4j-simple'
+        exclude group: 'org.slf4j', module: 'slf4j-log4j12'
+	    exclude group: 'log4j'
+        exclude group: 'commons-logging', module: 'commons-logging'
+
+        // com.codahale.metrics artifacts conflict with the io.dropwizard metrics stuff Riposte uses.
+        exclude group: 'com.codahale.metrics'
+    }
+}
+
+dependencies {
+    implementation(
+        project(':' + rootProject.name + '-core-code')
+    )
+}
+
+// ========== COMBO TEST REPORT - View the combined/merged report at: [project_root]/build/reports/tests/index.html
+apply from: file(rootProject.projectDir.getAbsolutePath() + '/gradle/junitComboTestReport.gradle')
+
+// ========== JACOCO SETUP - View the combined/merged report at: [project_root]/build/reports/jacoco/jacocoRootReport/html/index.html.
+//                           Individual reports for each submodule can be found at: [project_root]/[submodule]/build/reports/jacoco/test/html/index.html
+apply from: file(rootProject.projectDir.getAbsolutePath() + '/gradle/jacoco.gradle')
+
+allprojects {
+    group = groupId // Necessary for the maven install task to function correctly
+
+    task versionInfo {
+        doLast {
+            new File("$buildDir").mkdirs()
+            def versionfile = new File("$buildDir/version.properties")
+            versionfile.createNewFile()
+            versionfile << "release.version=$artifactId-$version"
+        }
+    }
+
+    build.dependsOn versionInfo
+}
+
+shadowJar {
+    doFirst {
+        println("The Executable jar should be created at build/libs/${rootProject.name}-${archiveVersion.get()}.jar")
+    }
+
+    // Disable the "-all" portion of the default shadow jar name.
+    //      We want the output to be "${rootProject.name}-${version}.jar".
+    //      If you'd prefer the default shadow jar name then you can remove this line.
+    archiveClassifier.set('')
+}
+
+// This fixes shadow jar gradle warnings. See: https://github.com/johnrengelman/shadow/issues/713
+shadowJar.dependsOn("distTar", "distZip", "startScripts")
+
+// The root level shouldn't generate the normal jar and source jars, just the shadow jar. Disable the jar and source jar
+//      tasks for the root level project (this won't affect submodules, where we *do* want jars created)
+jar.enabled = false
+sourcesJar.enabled = false
+
+
+// TODO: EXAMPLE CLEANUP - This replaceTemplate task can be removed.
+task replaceTemplate {
+    description = 'Run Replace Template Groovy script'
+
+    doFirst {
+        System.setProperty("rootProjectLocation", rootProject.projectDir.getAbsolutePath())
+
+        evaluate(new File(rootProject.projectDir.getAbsolutePath() + "/riposte-microservice-template-core-code/src/main/groovy/setup.groovy"))
+    }
+}
+
